@@ -2,7 +2,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Números en agrupación</title>
+  <title>Números en serie</title>
   <style>
     body {
       margin: 0;
@@ -21,7 +21,7 @@
   </style>
 </head>
 <body>
-  <canvas id="canvas" width="800" height="500"></canvas>  <script>
+  <canvas id="canvas" width="900" height="520"></canvas>  <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
@@ -30,25 +30,65 @@
       '#9b59b6', '#e67e22', '#1abc9c', '#34495e', '#d35400'
     ];
 
-    const numbers = [];
-    const TOTAL = 20; // números totales rebotando
     const RADIUS = 16;
+    const NUMBERS_PER_VALUE = 5; // 5 de cada número
+    const MAX_CHAIN = 14;
 
-    function createNumber(value) {
-      return {
-        value,
-        x: Math.random() * (canvas.width - 2 * RADIUS) + RADIUS,
-        y: Math.random() * (canvas.height - 2 * RADIUS) + RADIUS,
-        vx: (Math.random() * 2 + 1) * (Math.random() < 0.5 ? -1 : 1),
-        vy: (Math.random() * 2 + 1) * (Math.random() < 0.5 ? -1 : 1),
-        r: RADIUS,
-        color: colors[(value - 1) % colors.length],
-        group: null
-      };
+    class Node {
+      constructor(value) {
+        this.value = value;
+        this.color = colors[value - 1];
+        this.x = Math.random() * (canvas.width - 2 * RADIUS) + RADIUS;
+        this.y = Math.random() * (canvas.height - 2 * RADIUS) + RADIUS;
+        this.vx = (Math.random() * 2 + 1) * (Math.random() < 0.5 ? -1 : 1);
+        this.vy = (Math.random() * 2 + 1) * (Math.random() < 0.5 ? -1 : 1);
+        this.chain = null;
+      }
     }
 
-    for (let i = 0; i < TOTAL; i++) {
-      numbers.push(createNumber((i % 9) + 1));
+    class Chain {
+      constructor(nodes) {
+        this.nodes = nodes;
+        this.vx = (Math.random() * 2 - 1);
+        this.vy = (Math.random() * 2 - 1);
+        nodes.forEach(n => n.chain = this);
+      }
+
+      update() {
+        this.nodes.forEach((n, i) => {
+          if (i === 0) {
+            n.x += this.vx;
+            n.y += this.vy;
+          } else {
+            const prev = this.nodes[i - 1];
+            const dx = prev.x - n.x;
+            const dy = prev.y - n.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            const target = RADIUS * 2;
+            n.x = prev.x - (dx / dist) * target;
+            n.y = prev.y - (dy / dist) * target;
+          }
+
+          if (n.x - RADIUS < 0 || n.x + RADIUS > canvas.width) this.vx *= -1;
+          if (n.y - RADIUS < 0 || n.y + RADIUS > canvas.height) this.vy *= -1;
+        });
+      }
+
+      explode() {
+        this.nodes.forEach(n => {
+          n.chain = null;
+          n.vx = (Math.random() * 4 - 2);
+          n.vy = (Math.random() * 4 - 2);
+        });
+      }
+    }
+
+    const nodes = [];
+
+    for (let v = 1; v <= 9; v++) {
+      for (let i = 0; i < NUMBERS_PER_VALUE; i++) {
+        nodes.push(new Node(v));
+      }
     }
 
     function distance(a, b) {
@@ -58,52 +98,47 @@
     function update() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Movimiento
-      numbers.forEach(n => {
-        if (n.group) return;
-
+      // Movimiento individual
+      nodes.forEach(n => {
+        if (n.chain) return;
         n.x += n.vx;
         n.y += n.vy;
-
-        if (n.x - n.r < 0 || n.x + n.r > canvas.width) n.vx *= -1;
-        if (n.y - n.r < 0 || n.y + n.r > canvas.height) n.vy *= -1;
+        if (n.x - RADIUS < 0 || n.x + RADIUS > canvas.width) n.vx *= -1;
+        if (n.y - RADIUS < 0 || n.y + RADIUS > canvas.height) n.vy *= -1;
       });
 
-      // Colisiones
-      for (let i = 0; i < numbers.length; i++) {
-        for (let j = i + 1; j < numbers.length; j++) {
-          const a = numbers[i];
-          const b = numbers[j];
-
-          if (distance(a, b) < a.r + b.r) {
-            if (!a.group && !b.group) {
-              a.group = b.group = [a, b];
-            } else if (a.group && !b.group && a.group.length < 14) {
-              a.group.push(b);
-              b.group = a.group;
-            } else if (b.group && !a.group && b.group.length < 14) {
-              b.group.push(a);
-              a.group = b.group;
-            } else if ((a.group && a.group.length >= 14) || (b.group && b.group.length >= 14)) {
-              // Explosión: se separan
-              const group = a.group || b.group;
-              group.forEach(n => {
-                n.group = null;
-                n.vx = (Math.random() * 4 - 2);
-                n.vy = (Math.random() * 4 - 2);
-              });
+      // Colisiones y agrupación
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i];
+          const b = nodes[j];
+          if (distance(a, b) < RADIUS * 2) {
+            if (!a.chain && !b.chain) {
+              new Chain([a, b]);
+            } else if (a.chain && !b.chain && a.chain.nodes.length < MAX_CHAIN) {
+              a.chain.nodes.push(b);
+              b.chain = a.chain;
+            } else if (b.chain && !a.chain && b.chain.nodes.length < MAX_CHAIN) {
+              b.chain.nodes.push(a);
+              a.chain = b.chain;
+            } else if ((a.chain && a.chain.nodes.length >= MAX_CHAIN) ||
+                       (b.chain && b.chain.nodes.length >= MAX_CHAIN)) {
+              (a.chain || b.chain).explode();
             }
           }
         }
       }
 
+      // Actualizar cadenas
+      const chains = new Set(nodes.filter(n => n.chain).map(n => n.chain));
+      chains.forEach(c => c.update());
+
       // Dibujar
-      numbers.forEach(n => {
+      nodes.forEach(n => {
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.arc(n.x, n.y, RADIUS, 0, Math.PI * 2);
         ctx.fillStyle = n.color;
         ctx.fill();
-
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
